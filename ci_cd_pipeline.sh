@@ -1,37 +1,38 @@
 #!/bin/bash
 ################################################################################
-# CI/CD Pipeline Script for DevSecOps
+# CI/CD Pipeline Script for DevSecOps with Auto-Installation of Tools
 #
-# This script orchestrates a CI/CD pipeline that integrates:
-#   - Code scanning for secrets using Talisman
-#   - Vulnerability scanning with OWASP Dependency-Check
+# This script orchestrates a CI/CD pipeline that integrates multiple stages:
+#   - Talisman secret scan
+#   - OWASP Dependency-Check vulnerability scan
 #   - Python unit tests execution
-#   - Infrastructure validation using Terraform (IaC)
-#   - OS configurations via Ansible playbook
-#   - Code quality analysis through SonarQube
-#   - Docker image build and scanning (Trivy and Snyk)
-#   - Static (SAST) and Dynamic (DAST using OWASP ZAP) security testing
-#   - Jenkins job triggering and GitHub integration
-#   - Monitoring configuration setup using Prometheus & Grafana
-#   - Deployment of the application to Kubernetes
+#   - Terraform IaC validation and planning
+#   - Ansible playbook execution for OS configuration
+#   - SonarQube analysis
+#   - Docker image build and container vulnerability scans (Trivy & Snyk)
+#   - Static (SAST) and Dynamic (DAST via OWASP ZAP) security testing
+#   - Jenkins job triggering
+#   - Monitoring setup using Prometheus & Grafana
+#   - Application deployment to Kubernetes
+#
+# This version checks if tools are installed and attempts to install them
+# (or prompts you for manual installation) if not found.
 #
 # Usage:
 #   1. Make executable:
 #         chmod +x ci_cd_pipeline.sh
 #
-#   2. To execute the entire pipeline:
+#   2. Execute the entire pipeline:
 #         ./ci_cd_pipeline.sh
 #
-#   3. To execute a specific stage (example: Terraform validation):
+#   3. Execute a specific stage (e.g., Terraform validation):
 #         ./ci_cd_pipeline.sh -s terraform
 #
 #   4. For help:
 #         ./ci_cd_pipeline.sh -h
 #
 # Note:
-#   This script assumes all required tools (Python3, Terraform, Ansible, Docker,
-#   Talisman, dependency-check, sonar-scanner, trivy, snyk, zap-baseline.py,
-#   kubectl, etc.) are installed and available in the $PATH.
+#   Some installation steps might require manual intervention (e.g., sonar-scanner).
 ################################################################################
 
 # Exit immediately if a command exits with a non-zero status,
@@ -105,31 +106,53 @@ log_info() {
 }
 
 ##############################
+# Function: check_and_install_tool
+# Description: Check if a tool is installed; if not, attempt installation or prompt manual install.
+#
+# Parameters:
+#   $1 - command name to check
+#   $2 - installation command (should be wrapped in quotes)
+##############################
+check_and_install_tool() {
+    local tool_name="$1"
+    local install_command="$2"
+    echo "Checking if $tool_name is installed..."
+    if ! command -v "$tool_name" &> /dev/null; then
+        echo "$tool_name not found. Attempting to install $tool_name..."
+        eval "$install_command"
+        # Pause briefly to let installation finish
+        sleep 2
+        if ! command -v "$tool_name" &> /dev/null; then
+            echo "Failed to install $tool_name. Please install it manually and re-run the script."
+            exit 1
+        else
+            echo "$tool_name installed successfully."
+        fi
+    else
+        echo "$tool_name is already installed."
+    fi
+}
+
+##############################
 # Function: run_talisman
-# Description: Run Talisman for secret detection in the repository.
+# Description: Run Talisman to scan for secrets in the repository.
 ##############################
 run_talisman() {
     log_info "Running Talisman scan to detect potential secrets in code..."
-    if ! command -v talisman &> /dev/null; then
-        echo "Talisman not installed. Please install talisman to proceed."
-        exit 1
-    fi
-    # Scan current directory for secrets
+    check_and_install_tool "talisman" "pip3 install talisman"  # Attempt installation via pip3
+    # Scan current directory for secrets.
     talisman --scan .
     log_info "Talisman scan completed."
 }
 
 ##############################
 # Function: run_dependency_check
-# Description: Run OWASP Dependency Check to scan for vulnerable dependencies.
+# Description: Run OWASP Dependency Check for vulnerable dependencies.
 ##############################
 run_dependency_check() {
     log_info "Running Dependency Check for vulnerable dependencies..."
-    if ! command -v dependency-check &> /dev/null; then
-        echo "dependency-check is not installed. Please install it to proceed."
-        exit 1
-    fi
-    # Generate an HTML report by scanning the current directory
+    check_and_install_tool "dependency-check" "sudo snap install dependency-check || echo 'Please install dependency-check manually from https://github.com/jeremylong/DependencyCheck'" 
+    # Generate an HTML report by scanning the current directory.
     dependency-check --project "My Project" --out ./dependency-check-report.html --scan .
     log_info "Dependency check completed. Report generated at dependency-check-report.html."
 }
@@ -140,11 +163,8 @@ run_dependency_check() {
 ##############################
 run_python_tests() {
     log_info "Running Python unit tests..."
-    if ! command -v python3 &> /dev/null; then
-        echo "python3 is not installed. Please install Python 3."
-        exit 1
-    fi
-    # Discover and run tests in the 'tests' directory
+    check_and_install_tool "python3" "sudo apt install python3 -y"
+    # Discover and run tests in the 'tests' directory.
     python3 -m unittest discover -s tests
     log_info "Python tests completed."
 }
@@ -155,10 +175,7 @@ run_python_tests() {
 ##############################
 run_terraform() {
     log_info "Running Terraform configuration validation..."
-    if ! command -v terraform &> /dev/null; then
-        echo "Terraform is not installed. Please install Terraform."
-        exit 1
-    fi
+    check_and_install_tool "terraform" "sudo snap install terraform --classic"
     # Initialize, validate, and plan Terraform configuration non-interactively.
     terraform init -input=false
     terraform validate
@@ -172,11 +189,8 @@ run_terraform() {
 ##############################
 run_ansible() {
     log_info "Executing Ansible playbook for OS configurations..."
-    if ! command -v ansible-playbook &> /dev/null; then
-        echo "Ansible not installed. Please install Ansible."
-        exit 1
-    fi
-    # Assumes the inventory file (inventory.ini) and playbook (playbook.yml) exist
+    check_and_install_tool "ansible-playbook" "sudo apt install ansible -y"
+    # Assumes the inventory file (inventory.ini) and playbook (playbook.yml) exist.
     ansible-playbook -i inventory.ini playbook.yml
     log_info "Ansible playbook executed successfully."
 }
@@ -187,10 +201,7 @@ run_ansible() {
 ##############################
 run_sonar_analysis() {
     log_info "Starting SonarQube analysis..."
-    if ! command -v sonar-scanner &> /dev/null; then
-        echo "sonar-scanner not installed. Please install SonarQube scanner."
-        exit 1
-    fi
+    check_and_install_tool "sonar-scanner" "echo 'Please install sonar-scanner manually from https://docs.sonarqube.org/latest/analysis/scan/sonarscanner/'; exit 1"
     # Run the sonar-scanner with default configuration; customize as necessary.
     sonar-scanner
     log_info "SonarQube analysis completed."
@@ -198,32 +209,26 @@ run_sonar_analysis() {
 
 ##############################
 # Function: run_docker_build_and_scan
-# Description: Build a Docker image and perform vulnerability scans using Trivy and Snyk.
+# Description: Build a Docker image and perform vulnerability scans.
 ##############################
 run_docker_build_and_scan() {
     log_info "Starting Docker image build..."
-    if ! command -v docker &> /dev/null; then
-        echo "docker is not installed. Please install Docker."
-        exit 1
-    fi
+    check_and_install_tool "docker" "sudo apt install docker.io -y && sudo systemctl start docker && sudo systemctl enable docker"
     local image_tag="myapp:latest"  # Docker image tag
     docker build -t "$image_tag" .
     log_info "Docker image built with tag: $image_tag."
 
-    # Scan the Docker image with Trivy
+    # Scan the Docker image with Trivy.
     log_info "Scanning Docker image with Trivy..."
-    if ! command -v trivy &> /dev/null; then
-        echo "trivy is not installed. Please install Trivy."
-        exit 1
-    fi
+    check_and_install_tool "trivy" "wget -qO- https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add - && echo deb https://aquasecurity.github.io/trivy-repo/deb stable main | sudo tee /etc/apt/sources.list.d/trivy.list && sudo apt update && sudo apt install trivy -y"
     trivy image "$image_tag"
 
-    # Scan the Docker image with Snyk
+    # Scan the Docker image with Snyk.
     log_info "Scanning Docker image with Snyk..."
-    if ! command -v snyk &> /dev/null; then
-        echo "snyk is not installed. Please install Snyk."
-        exit 1
-    fi
+    # Ensure Node.js and npm are installed for Snyk installation.
+    check_and_install_tool "node" "sudo apt install nodejs -y"
+    check_and_install_tool "npm" "sudo apt install npm -y"
+    check_and_install_tool "snyk" "sudo npm install -g snyk"
     snyk container test "$image_tag"
     log_info "Docker image scanning completed."
 }
@@ -235,7 +240,7 @@ run_docker_build_and_scan() {
 run_sast() {
     log_info "Starting SAST scan..."
     # Placeholder command: Replace with your SAST tool's command.
-    echo "Running SAST scan..."
+    echo "Running SAST scan... (please replace with your SAST tool command)"
     log_info "SAST scan completed."
 }
 
@@ -246,12 +251,8 @@ run_sast() {
 ##############################
 run_dast() {
     log_info "Starting DAST scan..."
-    if ! command -v zap-baseline.py &> /dev/null; then
-        echo "OWASP ZAP baseline script not found. Please install OWASP ZAP."
-        exit 1
-    fi
-    # Define the target URL for scanning (adjust as needed)
-    local target_url="http://localhost"
+    check_and_install_tool "zap-baseline.py" "echo 'Please install OWASP ZAP from https://www.zaproxy.org/download/ and ensure zap-baseline.py is in your PATH'; exit 1"
+    local target_url="http://localhost"  # Adjust this URL as needed
     zap-baseline.py -t "$target_url"
     log_info "DAST scan completed using OWASP ZAP."
 }
@@ -262,8 +263,8 @@ run_dast() {
 ##############################
 trigger_jenkins_job() {
     log_info "Triggering Jenkins build job..."
-    # Placeholder: Replace with actual Jenkins CLI or API token-secured call.
-    echo "Triggering Jenkins job via Jenkins CLI or REST API..."
+    # For Jenkins, you must have the CLI or credentials set up.
+    echo "Triggering Jenkins job via Jenkins CLI or REST API... (please configure your Jenkins integration)"
     log_info "Jenkins job triggered."
 }
 
@@ -273,8 +274,8 @@ trigger_jenkins_job() {
 ##############################
 monitoring_setup() {
     log_info "Setting up monitoring with Prometheus and Grafana..."
-    # Placeholder: In production, this may involve deploying/updating Helm charts or manifests.
-    echo "Configuring Prometheus and Grafana dashboards..."
+    # Placeholder: Typically, you may deploy/update Helm charts or manifests.
+    echo "Configuring Prometheus and Grafana dashboards... (please configure as needed)"
     log_info "Monitoring tools configuration completed."
 }
 
@@ -284,18 +285,15 @@ monitoring_setup() {
 ##############################
 deploy_kubernetes() {
     log_info "Deploying application to Kubernetes..."
-    if ! command -v kubectl &> /dev/null; then
-        echo "kubectl is not installed. Please install kubectl."
-        exit 1
-    fi
-    # Assumes Kubernetes manifests are maintained in the 'k8s' directory.
+    check_and_install_tool "kubectl" "sudo snap install kubectl --classic"
+    # Assumes Kubernetes manifests reside in the 'k8s' directory.
     kubectl apply -f k8s/deployment.yml
     log_info "Application deployed to Kubernetes."
 }
 
 ##############################
 # Main: Orchestrate Pipeline Execution
-# Description: Based on the selected stage, execute the corresponding functions.
+# Description: Execute functions based on the chosen stage.
 ##############################
 main() {
     log_info "Starting CI/CD pipeline execution..."
